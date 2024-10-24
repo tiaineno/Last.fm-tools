@@ -1,4 +1,8 @@
-Last fm tools is a program for analyzing personal Last.fm data. Last.fm api key needed (KEY = (YOUR API KEY) in .env).
-Current features:
-    - Most listened track by every hour
-    - Filter listening history by a specific genre (not working yet with large histories)
+# Last.fm Tools
+
+A tool for analyzing personal Last.fm data. It requires a Last.fm API key, which should be set in the `.env` file as KEY = (YOUR API KEY)
+
+## Current Features
+
+- **Most listened track by every hour**
+- **Filter listening history by a specific genre** (currently not working with large histories)
