@@ -143,6 +143,16 @@ app.get('/api/hours/:user/', async (request, response) => {
   console.log('Success  :)')
 })
 
+//return the amount of unique tracks the user has scrobbled
+app.get('/api/uniquetracks/:user/', async (request, response) => {
+  const tracks = await getRecentTracks(request.params.user)
+  const trackNames = tracks.map(track => {
+    return `${track["artist"]["#text"]} ${track["name"]}`
+  })
+  const result = new Set(trackNames)
+  response.json(result.size)
+})
+
 const errorHandler = (error, request, response, next) => {
   console.error(error.message)
   next(error)
