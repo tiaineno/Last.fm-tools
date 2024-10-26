@@ -9,29 +9,35 @@ app.use(express.json())
 const cors = require('cors')
 app.use(cors())
 
-const fs = require('fs')
-const path = require('path')
+const { User, Artist } = require('./models/track')
 
 //check the genres of the given track and return true if they include the given genre
 const tagChecker = async (track, genre, dict) => {
   let artist
     
-  if (track.artist['#text'].includes(',')) {
-    artist = encodeURIComponent(track.artist['#text'].split(',')[0])
+  if (track.artist.includes(',')) {
+    artist = encodeURIComponent(track.artist.split(',')[0])
   } else {
-    artist = encodeURIComponent(track.artist['#text'])
+    artist = encodeURIComponent(track.artist)
   }
 
   const key = artist
   if (key in dict) {
-    return dict[key]
+    return dict[key].includes(genre)
   }
   const tags = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=artist.gettoptags&artist=${artist}&api_key=${process.env.KEY}&format=json`)
   try {
     const taglist = tags.data.toptags.tag
       .filter(tag => tag.count >= 15)
       .map(tag => tag.name)
-    dict[key] = taglist.includes(genre)
+
+    dict[key] = taglist
+    a = new Artist({
+      artist: artist,
+      genres: taglist
+    })
+    a.save()
+
     return taglist.includes(genre)
   } catch (error) {
     console.log(tags.data)
@@ -40,36 +46,49 @@ const tagChecker = async (track, genre, dict) => {
 
 //return users whole listening history from api or local storage
 const getRecentTracks = async (username) => {
-  const user = username
-  const filePath = path.join(__dirname, 'user_data', `${user}_tracks.json`)
-  let tracks = []
-
-  if (fs.existsSync(filePath)) {
-    console.log('Loading data from file...')
-    const fileData = fs.readFileSync(filePath)
-    tracks = JSON.parse(fileData)
-    return tracks
-  } else {
-    let page = 1
-    console.log(`Fetching page ${page}...`)
-    const firstPage = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${user}&page=${page}&api_key=${process.env.KEY}&format=json`)
-    const pages_count = parseInt(firstPage.data.recenttracks['@attr']['totalPages'])
-    tracks = tracks.concat(firstPage.data.recenttracks.track)
-
-    if (pages_count > 1) {
-      for (let p = 2; p <= pages_count; p++) {
-        console.log(`Fetching page ${p}...`)
-        const pageData = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${user}&page=${p}&api_key=${process.env.KEY}&format=json`)
-        tracks = tracks.concat(pageData.data.recenttracks.track)
-        console.log(`Fetched page ${p}`)
-      }
-    }
-    fs.mkdirSync(path.join(__dirname, 'user_data'), { recursive: true })
-    fs.writeFileSync(filePath, JSON.stringify(tracks, null, 2))
-    console.log('Data saved to file:', filePath)
-    return tracks
+  console.log(username)
+  let user = await User.findOne({ username: username })
+  console.log(user)
+  if (user) {
+    console.log('Returning tracks from MongoDB...')
+    return user.recentTracks
   }
+  let tracks = []
+  let page = 1
+
+  console.log(`Fetching page ${page}...`)
+  const firstPage = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${username}&page=${page}&api_key=${process.env.KEY}&format=json`)
+  const pages_count = parseInt(firstPage.data.recenttracks['@attr']['totalPages'])
+  tracks = tracks.concat(firstPage.data.recenttracks.track)
+
+  if (pages_count > 1) {
+    for (let p = 2; p <= pages_count; p++) {
+      console.log(`Fetching page ${p}...`)
+      const pageData = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${username}&page=${p}&api_key=${process.env.KEY}&format=json`)
+      tracks = tracks.concat(pageData.data.recenttracks.track)
+      console.log(`Fetched page ${p}`)
+    }
+  }
+  console.log(tracks.length)
+
+  const formattedTracks = tracks.map(track => ({
+    artist: track.artist['#text'],
+    title: track.name,
+    album: track.album ? track.album['#text'] : 'Unknown Album',
+    date: track.date ? new Date(track.date['#text']) : null
+  }))
+
+  user = new User({
+    username: username,
+    recentTracks: formattedTracks
+  })
+
+  await user.save()
+  console.log('Data saved')
+  console.log(formattedTracks.length)
+  return formattedTracks
 }
+
 
 // Return every song matching with the given genre from user's entire listening history
 app.get('/api/genres/:user/:genre', async (request, response) => {
@@ -78,7 +97,14 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
   console.log('Processing tracks')
   let results = []
   let dict = {}
-  const batchSize = 100
+  let artists = await Artist.find({})
+  console.log(artists)
+  artists.forEach(artist => {
+    dict[artist.artist] = artist.genres;
+  })
+  console.log(dict)
+
+  const batchSize = 50
 
   for (let i = 0; i < tracks.length; i += batchSize) {
     console.log(`Processing tracks ${i}-${i + batchSize}`)
@@ -88,8 +114,9 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
       const genre = await tagChecker(track, request.params.genre, dict)
       if (genre) {
         return {
-          artist: track.artist['#text'],
-          name: track.name
+          artist: track.artist,
+          name: track.title,
+          date: track.date
         }
       }
     })
@@ -97,6 +124,7 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
     const filteredTracks = await Promise.all(promises)
     results = results.concat(filteredTracks.filter(track => track !== undefined))
   }
+
   response.json(results)
 })
 
@@ -111,9 +139,9 @@ app.get('/api/hours/:user/', async (request, response) => {
 
   for (let i = 0; i < tracks.length; i++) {
     try {
-      const key = `${tracks[i]['artist']['#text']} ${tracks[i]['name']}`
+      const key = `${tracks[i].artist} ${tracks[i].name}`
       if (key !== 'KekeKik Jyystö Jötikkä Anthem') {
-        const date = new Date(tracks[i]['date']['#text'])
+        const date = new Date(tracks[i].date)
         const hour = date.getHours()
         if (!(key in dict[hour])) {
           dict[hour][key] = 0
@@ -121,7 +149,7 @@ app.get('/api/hours/:user/', async (request, response) => {
         dict[hour][key]+=1
       }
     } catch (error) {
-      console.log(tracks[i]['name'])
+      console.log(tracks[i].name)
     }
   }
 
@@ -141,16 +169,6 @@ app.get('/api/hours/:user/', async (request, response) => {
 
   response.json(result)
   console.log('Success  :)')
-})
-
-//return the amount of unique tracks the user has scrobbled
-app.get('/api/uniquetracks/:user/', async (request, response) => {
-  const tracks = await getRecentTracks(request.params.user)
-  const trackNames = tracks.map(track => {
-    return `${track["artist"]["#text"]} ${track["name"]}`
-  })
-  const result = new Set(trackNames)
-  response.json(result.size)
 })
 
 const errorHandler = (error, request, response, next) => {
