@@ -102,7 +102,6 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
   artists.forEach(artist => {
     dict[artist.artist] = artist.genres;
   })
-  console.log(dict)
 
   const batchSize = 50
 
@@ -128,8 +127,9 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
   response.json(results)
 })
 
-//return the most listened song of each hour from users entire listening history
-app.get('/api/hours/:user/', async (request, response) => {
+//return the most listened song of each hour from users entire listening history,
+//ignoring the optional parameter ignore
+app.get('/api/hours/:user/:ignore?', async (request, response) => {
   const tracks = await getRecentTracks(request.params.user)
   console.log('Processing tracks')
   let dict = {}
@@ -139,8 +139,8 @@ app.get('/api/hours/:user/', async (request, response) => {
 
   for (let i = 0; i < tracks.length; i++) {
     try {
-      const key = `${tracks[i].artist} ${tracks[i].name}`
-      if (key !== 'KekeKik Jyystö Jötikkä Anthem') {
+      const key = `${tracks[i].artist} ${tracks[i].title}`
+      if (key !== request.params.ignore) {
         const date = new Date(tracks[i].date)
         const hour = date.getHours()
         if (!(key in dict[hour])) {
@@ -149,7 +149,7 @@ app.get('/api/hours/:user/', async (request, response) => {
         dict[hour][key]+=1
       }
     } catch (error) {
-      console.log(tracks[i].name)
+      console.log("error with track", tracks[i].title)
     }
   }
 
