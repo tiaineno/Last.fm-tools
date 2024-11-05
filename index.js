@@ -44,27 +44,30 @@ const tagChecker = async (track, genre, dict) => {
   }
 }
 
-//return users whole listening history from api or local storage
-const getRecentTracks = async (username) => {
+const getRecentTracks = async (username, from, to) => {
   console.log(username)
   let user = await User.findOne({ username: username })
-  console.log(user)
   if (user) {
     console.log('Returning tracks from MongoDB...')
     return user.recentTracks
   }
+  return await getRecentTracksApi()
+}
+
+//return users whole listening history from api or local storage
+const getRecentTracksApi = async (username, from=0, to=Date.now()) => {
   let tracks = []
   let page = 1
 
   console.log(`Fetching page ${page}...`)
-  const firstPage = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${username}&page=${page}&api_key=${process.env.KEY}&format=json`)
+  const firstPage = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&from=${from}&to=${to}&limit=500&user=${username}&page=${page}&api_key=${process.env.KEY}&format=json`)
   const pages_count = parseInt(firstPage.data.recenttracks['@attr']['totalPages'])
   tracks = tracks.concat(firstPage.data.recenttracks.track)
 
   if (pages_count > 1) {
     for (let p = 2; p <= pages_count; p++) {
       console.log(`Fetching page ${p}...`)
-      const pageData = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&limit=500&user=${username}&page=${p}&api_key=${process.env.KEY}&format=json`)
+      const pageData = await axios.get(`https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&from=${from}&to=${to}&limit=500&user=${username}&page=${p}&api_key=${process.env.KEY}&format=json`)
       tracks = tracks.concat(pageData.data.recenttracks.track)
       console.log(`Fetched page ${p}`)
     }
@@ -98,7 +101,7 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
   let results = []
   let dict = {}
   let artists = await Artist.find({})
-  console.log(artists)
+
   artists.forEach(artist => {
     dict[artist.artist] = artist.genres;
   })
@@ -107,6 +110,7 @@ app.get('/api/genres/:user/:genre', async (request, response) => {
 
   for (let i = 0; i < tracks.length; i += batchSize) {
     console.log(`Processing tracks ${i}-${i + batchSize}`)
+    console.log(tracks)
     const batch = tracks.slice(i, i + batchSize)
 
     const promises = batch.map(async (track) => {
